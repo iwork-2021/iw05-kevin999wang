@@ -181,10 +181,25 @@ class ViewController: UIViewController {
 
   func processObservations(for request: VNRequest, error: Error?) {
     //call show function
+      if let results = request.results as? [VNRecognizedObjectObservation] {
+          if results.isEmpty {
+              print("Nothing found...")
+          } else {
+              self.show(predictions: results)
+          }
+      } else if let error = error {
+          print("An error occured: \(error.localizedDescription)")
+      } else {
+          print("???")
+      }
   }
 
   func show(predictions: [VNRecognizedObjectObservation]) {
    //process the results, call show function in BoundingBoxView
+      for item in predictions {
+          self.boundingBoxViews
+      }
+  }
 }
 
 extension ViewController: VideoCaptureDelegate {
