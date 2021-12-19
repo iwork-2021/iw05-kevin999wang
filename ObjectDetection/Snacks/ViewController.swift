@@ -32,178 +32,229 @@ import UIKit
 import Vision
 
 class ViewController: UIViewController {
-
-  @IBOutlet var videoPreview: UIView!
-
-  var videoCapture: VideoCapture!
-  var currentBuffer: CVPixelBuffer?
-
-  lazy var visionModel: VNCoreMLModel = {
-    do {
-//        let coreMLWrapper = SnackLocalizationModel()
-      let coreMLWrapper = SnackDetector()
-      let visionModel = try VNCoreMLModel(for: coreMLWrapper.model)
-
-      if #available(iOS 13.0, *) {
-        visionModel.inputImageFeatureName = "image"
-        visionModel.featureProvider = try MLDictionaryFeatureProvider(dictionary: [
-          "iouThreshold": MLFeatureValue(double: 0.45),
-          "confidenceThreshold": MLFeatureValue(double: 0.25),
-        ])
-      }
-
-      return visionModel
-    } catch {
-      fatalError("Failed to create VNCoreMLModel: \(error)")
-    }
-  }()
-
-  lazy var visionRequest: VNCoreMLRequest = {
-    let request = VNCoreMLRequest(model: visionModel, completionHandler: {
-      [weak self] request, error in
-      self?.processObservations(for: request, error: error)
-    })
-
-    // NOTE: If you choose another crop/scale option, then you must also
-    // change how the BoundingBoxView objects get scaled when they are drawn.
-    // Currently they assume the full input image is used.
-    request.imageCropAndScaleOption = .scaleFill
-    return request
-  }()
-
-  let maxBoundingBoxViews = 10
-  var boundingBoxViews = [BoundingBoxView]()
-  var colors: [String: UIColor] = [:]
-
-  override func viewDidLoad() {
-    super.viewDidLoad()
-    setUpBoundingBoxViews()
-    setUpCamera()
-  }
-
-  func setUpBoundingBoxViews() {
-    for _ in 0..<maxBoundingBoxViews {
-      boundingBoxViews.append(BoundingBoxView())
-    }
-
-    let labels = [
-      "apple",
-      "banana",
-      "cake",
-      "candy",
-      "carrot",
-      "cookie",
-      "doughnut",
-      "grape",
-      "hot dog",
-      "ice cream",
-      "juice",
-      "muffin",
-      "orange",
-      "pineapple",
-      "popcorn",
-      "pretzel",
-      "salad",
-      "strawberry",
-      "waffle",
-      "watermelon",
-    ]
-
-    // Make colors for the bounding boxes. There is one color for
-    // each class, 20 classes in total.
-    var i = 0
-    for r: CGFloat in [0.5, 0.6, 0.75, 0.8, 1.0] {
-      for g: CGFloat in [0.5, 0.8] {
-        for b: CGFloat in [0.5, 0.8] {
-          colors[labels[i]] = UIColor(red: r, green: g, blue: b, alpha: 1)
-          i += 1
+    
+    @IBOutlet var videoPreview: UIView!
+    
+    var videoCapture: VideoCapture!
+    var currentBuffer: CVPixelBuffer?
+    
+    var timer: Timer?
+    
+    lazy var visionModel: VNCoreMLModel = {
+        do {
+            //        let coreMLWrapper = SnackLocalizationModel()
+            let coreMLWrapper = SnackDetector()
+            let visionModel = try VNCoreMLModel(for: coreMLWrapper.model)
+            
+            if #available(iOS 13.0, *) {
+                visionModel.inputImageFeatureName = "image"
+                visionModel.featureProvider = try MLDictionaryFeatureProvider(dictionary: [
+                    "iouThreshold": MLFeatureValue(double: 0.45),
+                    "confidenceThreshold": MLFeatureValue(double: 0.25),
+                ])
+            }
+            
+            return visionModel
+        } catch {
+            fatalError("Failed to create VNCoreMLModel: \(error)")
         }
-      }
+    }()
+    
+    lazy var visionRequest: VNCoreMLRequest = {
+        let request = VNCoreMLRequest(model: visionModel, completionHandler: {
+            [weak self] request, error in
+            self?.processObservations(for: request, error: error)
+        })
+        
+        // NOTE: If you choose another crop/scale option, then you must also
+        // change how the BoundingBoxView objects get scaled when they are drawn.
+        // Currently they assume the full input image is used.
+        request.imageCropAndScaleOption = .scaleFill
+        return request
+    }()
+    
+    let maxBoundingBoxViews = 10
+    var boundingBoxViews = [BoundingBoxView]()
+    var colors: [String: UIColor] = [:]
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setUpBoundingBoxViews()
+        setUpCamera()
+        self.timer = Timer.scheduledTimer(timeInterval: 0.6, target: self, selector: #selector(hideOntime), userInfo: nil, repeats: true)
     }
-  }
-
-  func setUpCamera() {
-    videoCapture = VideoCapture()
-    videoCapture.delegate = self
-
-    // Change this line to limit how often the video capture delegate gets
-    // called. 1 means it is called 30 times per second, which gives realtime
-    // results but also uses more battery power.
-    videoCapture.frameInterval = 1
-
-    videoCapture.setUp(sessionPreset: .hd1280x720) { success in
-      if success {
-        // Add the video preview into the UI.
-        if let previewLayer = self.videoCapture.previewLayer {
-          self.videoPreview.layer.addSublayer(previewLayer)
-          self.resizePreviewLayer()
+    
+    override func viewDidDisappear(_ animated: Bool) {
+         if self.timer != nil {
+              self.timer?.invalidate()
+         }
+    }
+    
+    func setUpBoundingBoxViews() {
+        for _ in 0..<maxBoundingBoxViews {
+            boundingBoxViews.append(BoundingBoxView())
         }
-
-        // Add the bounding box layers to the UI, on top of the video preview.
-        for box in self.boundingBoxViews {
-          box.addToLayer(self.videoPreview.layer)
+        
+        let labels = [
+            "apple",
+            "banana",
+            "cake",
+            "candy",
+            "carrot",
+            "cookie",
+            "doughnut",
+            "grape",
+            "hot dog",
+            "ice cream",
+            "juice",
+            "muffin",
+            "orange",
+            "pineapple",
+            "popcorn",
+            "pretzel",
+            "salad",
+            "strawberry",
+            "waffle",
+            "watermelon",
+        ]
+        
+        // Make colors for the bounding boxes. There is one color for
+        // each class, 20 classes in total.
+        var i = 0
+        for r: CGFloat in [0.5, 0.6, 0.75, 0.8, 1.0] {
+            for g: CGFloat in [0.5, 0.8] {
+                for b: CGFloat in [0.5, 0.8] {
+                    colors[labels[i]] = UIColor(red: r, green: g, blue: b, alpha: 1)
+                    i += 1
+                }
+            }
         }
-
-        // Once everything is set up, we can start capturing live video.
-        self.videoCapture.start()
-      }
     }
-  }
-
-  override func viewWillLayoutSubviews() {
-    super.viewWillLayoutSubviews()
-    resizePreviewLayer()
-  }
-
-  func resizePreviewLayer() {
-    videoCapture.previewLayer?.frame = videoPreview.bounds
-  }
-
-  func predict(sampleBuffer: CMSampleBuffer) {
-    if currentBuffer == nil, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
-      currentBuffer = pixelBuffer
-
-      // Get additional info from the camera.
-      var options: [VNImageOption : Any] = [:]
-      if let cameraIntrinsicMatrix = CMGetAttachment(sampleBuffer, key: kCMSampleBufferAttachmentKey_CameraIntrinsicMatrix, attachmentModeOut: nil) {
-        options[.cameraIntrinsics] = cameraIntrinsicMatrix
-      }
-
-      let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: options)
-      do {
-        try handler.perform([self.visionRequest])
-      } catch {
-        print("Failed to perform Vision request: \(error)")
-      }
-      currentBuffer = nil
+    
+    func setUpCamera() {
+        videoCapture = VideoCapture()
+        videoCapture.delegate = self
+        
+        // Change this line to limit how often the video capture delegate gets
+        // called. 1 means it is called 30 times per second, which gives realtime
+        // results but also uses more battery power.
+        videoCapture.frameInterval = 2
+        
+        videoCapture.setUp(sessionPreset: .hd1920x1080) { success in
+            if success {
+                // Add the video preview into the UI.
+                if let previewLayer = self.videoCapture.previewLayer {
+                    self.videoPreview.layer.addSublayer(previewLayer)
+                    self.resizePreviewLayer()
+                }
+                
+                // Add the bounding box layers to the UI, on top of the video preview.
+                for box in self.boundingBoxViews {
+                    box.addToLayer(self.videoPreview.layer)
+                }
+                
+                // Once everything is set up, we can start capturing live video.
+                self.videoCapture.start()
+            }
+        }
     }
-  }
-
-  func processObservations(for request: VNRequest, error: Error?) {
-    //call show function
-      if let results = request.results as? [VNRecognizedObjectObservation] {
-          if results.isEmpty {
-              print("Nothing found...")
-          } else {
-              self.show(predictions: results)
-          }
-      } else if let error = error {
-          print("An error occured: \(error.localizedDescription)")
-      } else {
-          print("???")
-      }
-  }
-
-  func show(predictions: [VNRecognizedObjectObservation]) {
-   //process the results, call show function in BoundingBoxView
-      for item in predictions {
-          self.boundingBoxViews
-      }
-  }
+    
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        resizePreviewLayer()
+    }
+    
+    func resizePreviewLayer() {
+        videoCapture.previewLayer?.frame = videoPreview.bounds
+    }
+    
+    func predict(sampleBuffer: CMSampleBuffer) {
+        if currentBuffer == nil, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            currentBuffer = pixelBuffer
+            
+            // Get additional info from the camera.
+            var options: [VNImageOption : Any] = [:]
+            if let cameraIntrinsicMatrix = CMGetAttachment(sampleBuffer, key: kCMSampleBufferAttachmentKey_CameraIntrinsicMatrix, attachmentModeOut: nil) {
+                options[.cameraIntrinsics] = cameraIntrinsicMatrix
+            }
+            
+            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: options)
+            do {
+                try handler.perform([self.visionRequest])
+            } catch {
+                print("Failed to perform Vision request: \(error)")
+            }
+            currentBuffer = nil
+        }
+    }
+    
+    func processObservations(for request: VNRequest, error: Error?) {
+        //call show function
+        if let results = request.results as? [VNRecognizedObjectObservation] {
+            if results.isEmpty {
+                print("Nothing found...")
+            } else {
+                self.show(predictions: results)
+//                self.hide()
+            }
+        } else if let error = error {
+            print("An error occured: \(error.localizedDescription)")
+        } else {
+            print("???")
+        }
+    }
+    
+    @objc func hideOntime() {
+        for index in 0..<self.maxBoundingBoxViews {
+            self.boundingBoxViews[index].hide()
+        }
+    }
+    
+    func show(predictions: [VNRecognizedObjectObservation]) {
+        //process the results, call show function in BoundingBoxView
+        for index in 0..<predictions.count {
+            if index >= self.maxBoundingBoxViews {
+                break
+            }
+            
+            
+            
+            DispatchQueue.main.async {
+                let labels = predictions[index].labels
+                if labels.isEmpty {
+                    print("error")
+                }
+                else {
+                    let identifier = labels[0].identifier
+                    let confidence = labels[0].confidence
+                    if confidence > 0.8 {
+                        let color = self.colors[identifier]
+                        let boundingBox = predictions[index].boundingBox
+                        let screenWidth = UIScreen.main.bounds.width
+                        let screenHeight = UIScreen.main.bounds.height
+                        //                  print(boundingBox.width)
+                        let realX = boundingBox.minX * screenWidth
+                        let realY = boundingBox.minY * screenHeight
+                        let realWidth = boundingBox.width * screenWidth
+                        let realHeight = boundingBox.height * screenHeight
+                        let frame = CGRect(x: realX, y: realY, width: realWidth, height: realHeight)
+                        let myCon = String(format: "%.1f", 100 * confidence)
+                        let label = identifier + " " + myCon
+                        let curBox = self.boundingBoxViews[index]
+                        curBox.show(frame: frame, label: label, color: color!)
+//                        usleep(1000 * 20)
+//                        sleep(1)
+//                        curBox.hide()
+                    }
+                }
+            }
+            
+        }
+    }
 }
 
 extension ViewController: VideoCaptureDelegate {
-  func videoCapture(_ capture: VideoCapture, didCaptureVideoFrame sampleBuffer: CMSampleBuffer) {
-    predict(sampleBuffer: sampleBuffer)
-  }
+    func videoCapture(_ capture: VideoCapture, didCaptureVideoFrame sampleBuffer: CMSampleBuffer) {
+        predict(sampleBuffer: sampleBuffer)
+    }
 }
